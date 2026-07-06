@@ -92,11 +92,14 @@ class Realtime:
                 f"(mqtt_addr={self.dc.mqtt_addr!r}); MQTT is not implemented.")
         self._ssl = None if account.settings.verify_tls else False
 
-    async def listen(self, on_event: OnEvent | None = None) -> None:
+    async def listen(self, on_event: OnEvent | None = None,
+                     on_connect: Callable[[], Awaitable[None]] | None = None) -> None:
         """Stream events, calling on_event(LockEvent) for each. Auto-reconnects.
 
         Runs until cancelled. on_event may be a sync function or a coroutine
-        function. Cancel-safe: cancelling the task closes the socket cleanly.
+        function. on_connect (a coroutine function) is awaited after each
+        (re)connect -- use it to resync state that changed while the socket was
+        down. Cancel-safe: cancelling the task closes the socket cleanly.
         (For a time-boxed run, wrap in asyncio.wait_for or cancel the task.)
         """
         is_coro = on_event is not None and asyncio.iscoroutinefunction(on_event)
@@ -108,6 +111,8 @@ class Realtime:
                     url, protocols=(token,), ssl=self._ssl, heartbeat=5,
                 ) as ws:
                     _LOGGER.debug("ws connected to %s", self.dc.code)
+                    if on_connect is not None:
+                        await on_connect()
                     async for msg in ws:
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             continue

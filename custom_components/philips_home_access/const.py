@@ -12,5 +12,9 @@ PLATFORMS = [Platform.LOCK, Platform.BINARY_SENSOR, Platform.SENSOR]
 CONF_AREACODE = "areacode"
 DEFAULT_AREACODE = "61"
 
-# Safety-net poll interval (realtime WebSocket is the primary update path).
-UPDATE_INTERVAL = timedelta(minutes=5)
+# Poll intervals. Where a lock's datacenter has a realtime WebSocket, that's the
+# primary update path and the poll is just a slow safety-net (also resynced on
+# every WS reconnect). Datacenters without realtime (MQTT-only, not implemented)
+# are poll-only, so they poll fast.
+SLOW_POLL_INTERVAL = timedelta(minutes=15)
+FAST_POLL_INTERVAL = timedelta(seconds=60)

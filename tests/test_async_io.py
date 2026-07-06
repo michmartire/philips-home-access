@@ -274,3 +274,26 @@ async def test_ws_listen_parses_events():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert any(e.kind == "setLock" and e.state == "unlocked" for e in got)
+
+
+async def test_ws_awaits_on_connect():
+    """on_connect fires after (re)connect so the coordinator can resync state."""
+    claims = base64.urlsafe_b64encode(
+        json.dumps({"uid": "U1", "exp": int(time.time()) + 3600}).encode()
+    ).decode().rstrip("=")
+    sess = _WSSession([])
+    acct = Account(_settings(), sess)
+    acct.tokenset = TokenSet("U1", {"PhilipsNorthAmerica": claims})
+    rt = Realtime(acct, sess, "PhilipsNorthAmerica")
+
+    connects = []
+
+    async def on_connect():
+        connects.append(1)
+
+    task = asyncio.create_task(rt.listen(on_connect=on_connect))
+    await asyncio.sleep(0.02)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert connects, "on_connect should fire on connect"

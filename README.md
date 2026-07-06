@@ -14,7 +14,7 @@ with **real-time** state updates.
 - **Door** binary sensor — open / closed (the magnetic door contact).
 - **Battery** sensor — lock battery level.
 - **Real-time updates** over the cloud WebSocket — reflects app, keypad, and
-  manual operations within seconds (plus a 5-minute safety poll).
+  manual operations within seconds (plus a periodic safety poll).
 - **Auto-discovery** — all locks on your account appear automatically; each
   becomes its own device.
 - **Reauth** — prompts you to re-enter the password if it changes.
@@ -58,9 +58,21 @@ integration or its credentials directly.
 ## How it works / limitations
 
 - **Cloud-based** — requires internet; this is not a local (LAN/BLE) integration.
-- **Real-time** is delivered over a WebSocket for North-America-region locks.
-  Locks homed in a MQTT-only datacenter (e.g. Singapore) still work for commands
-  and update via the 5-minute poll, but don't get instant pushes yet.
+- **Real-time is North-America only.** Lock state is pushed instantly over a
+  WebSocket for locks homed in the North America datacenter. Where realtime is
+  available the poll is just a slow (~15 min) safety-net, and it re-syncs
+  immediately on every WebSocket reconnect so nothing is missed across a drop.
+- **Other datacenters are poll-only.** Locks homed in an MQTT-only datacenter
+  (e.g. Singapore) or the Oneness datacenter have **no push channel implemented**,
+  so they fall back to a frequent (~60 s) poll. Commands still work, but state
+  updates lag by up to that interval and **door open/close — an event-driven
+  signal — may not be reliably reflected** without realtime. MQTT support is a
+  roadmap item; it can't be built/tested without access to such an account.
+- **Commands are verified on North America only** — other datacenters' command
+  hosts are untested.
+- **Re-authentication uses your password.** The cloud session token lasts ~2 h
+  and there's no refresh token, so the integration re-logs-in with the stored
+  password when it expires (see *Account & credential security* above).
 - **Battery** is reported coarsely by the lock (it tends to sit at 100% then step
   down), so don't expect a smooth percentage.
 
@@ -147,8 +159,8 @@ the realtime WebSocket).
 ## Roadmap / possible refinements
 
 - **MQTT realtime for non-NA datacenters.** Only WebSocket (North America) is
-  implemented; locks homed in an MQTT datacenter (e.g. Singapore) update via the
-  5-minute poll only. Adding the MQTT path would give them instant pushes too.
+  implemented; locks homed in an MQTT datacenter (e.g. Singapore) update via a
+  frequent poll only. Adding the MQTT path would give them instant pushes too.
 - **Local/offline control via BLE.** The app has a BLE path (`createBleFrame`)
   with a cloud-negotiated session key — a stretch goal for no-cloud operation.
 - **Official brand & store listing.** Currently the Philips icon is bundled under

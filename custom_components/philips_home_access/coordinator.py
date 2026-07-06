@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, UPDATE_INTERVAL
+from .const import DOMAIN, FAST_POLL_INTERVAL, SLOW_POLL_INTERVAL
 from .homeaccess import (
     AuthError,
     Datacenter,
@@ -26,7 +26,7 @@ class PhilipsCoordinator(DataUpdateCoordinator[dict[str, LockState]]):
     """Holds the current state of every lock on the account."""
 
     def __init__(self, hass: HomeAssistant, client: HomeAccess) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=UPDATE_INTERVAL)
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SLOW_POLL_INTERVAL)
         self.client = client
         self.locks: dict[str, Lock] = {}          # esn -> latest Lock (metadata)
         self._trackers: dict[str, LockTracker] = {}
@@ -56,6 +56,14 @@ class PhilipsCoordinator(DataUpdateCoordinator[dict[str, LockState]]):
                     tr.state.door = lock.door
                 if lock.battery is not None:
                     tr.state.battery = lock.battery
+        # Locks whose datacenter has no realtime WS are poll-only -> poll fast;
+        # otherwise the WS is primary and the poll is a slow safety-net.
+        interval = (SLOW_POLL_INTERVAL
+                    if all(Datacenter.by_code(l.datacenter_code).ws_addr for l in locks)
+                    else FAST_POLL_INTERVAL)
+        if interval != self.update_interval:
+            _LOGGER.debug("poll interval -> %s", interval)
+            self.update_interval = interval
         _LOGGER.debug("poll: %d lock(s): %s", len(locks),
                       {esn: tr.state.summary() for esn, tr in self._trackers.items()})
         return {esn: tr.state for esn, tr in self._trackers.items()}
@@ -69,7 +77,12 @@ class PhilipsCoordinator(DataUpdateCoordinator[dict[str, LockState]]):
         for code in codes:
             rt = self.client.realtime(code)
             self._ws_tasks.append(self.hass.async_create_background_task(
-                rt.listen(on_event=self._on_event), name=f"{DOMAIN}_ws_{code}"))
+                rt.listen(on_event=self._on_event, on_connect=self._on_ws_connect),
+                name=f"{DOMAIN}_ws_{code}"))
+
+    async def _on_ws_connect(self) -> None:
+        """Resync on every (re)connect so a drop's missed events are caught."""
+        await self.async_request_refresh()
 
     @callback
     def _on_event(self, ev: LockEvent) -> None:
