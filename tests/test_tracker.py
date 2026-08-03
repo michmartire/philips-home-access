@@ -47,6 +47,20 @@ def test_same_second_stale_action_does_not_regress_bolt():
     assert r2.stale and not r2.changes and tr.state.bolt == "locked"
 
 
+def test_wifistate_tracks_connectivity_and_state_is_frozen_while_offline():
+    # A device going offline is the only realtime signal left once it drops --
+    # no further lock/door/action events can arrive until it reconnects.
+    tr = LockTracker(LockState("RL", bolt="locked", door="closed", battery=100))
+    assert tr.state.online is True
+    r = tr.apply(LockEvent("wifiState", "RL", state="0", timestamp="1"))
+    assert tr.state.online is False and "online=False" in r.changes
+    # commands issued while offline get no confirmation -> bolt stays put
+    tr.apply(LockEvent("setLock", "RL", state="unlocked", timestamp="2"))
+    assert tr.state.bolt == "locked" and tr.state.pending == "unlocking"
+    r = tr.apply(LockEvent("wifiState", "RL", state="1", timestamp="3"))
+    assert tr.state.online is True and "online=True" in r.changes
+
+
 def test_redelivery_does_not_regress_bolt():
     tr = LockTracker(LockState("RL", bolt="unlocked"))
     # original stale snapshot (recorded for dedup)

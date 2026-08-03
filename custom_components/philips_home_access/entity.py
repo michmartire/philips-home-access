@@ -24,7 +24,8 @@ class PhilipsLockEntity(CoordinatorEntity[PhilipsCoordinator]):
 
     @property
     def available(self) -> bool:
-        return super().available and self._lock_state is not None
+        st = self._lock_state
+        return super().available and st is not None and st.online
 
     @property
     def device_info(self) -> DeviceInfo:

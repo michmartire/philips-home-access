@@ -76,6 +76,8 @@ def _classify(d: dict) -> LockEvent | None:
             return LockEvent("action", lock_id,
                              state=constants.OPEN_STATUS.get(p.get("openStatus")),
                              battery=_int(p.get("power")), raw=d)
+        if ev == "wifiState":  # device's WiFi link to the cloud went up/down
+            return LockEvent("wifiState", lock_id, state=body.get("state"), raw=d)
         return LockEvent(f"wfevent/{ev}", lock_id, raw=d)
     return LockEvent(func or "?", lock_id, raw=d)
 

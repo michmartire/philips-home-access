@@ -34,10 +34,13 @@ class LockState:
     door: str | None = None        # "open" | "closed"
     battery: int | None = None
     pending: str | None = None     # "locking" | "unlocking" | None
+    online: bool = True            # cloud's view of the device's WiFi connectivity
 
     def summary(self) -> str:
         bat = f"{self.battery}%" if self.battery is not None else "?"
         s = f"lock={self.bolt or '?'} door={self.door or '?'} battery={bat}"
+        if not self.online:
+            s += " OFFLINE"
         return s + (f" ({self.pending}…)" if self.pending else "")
 
 
@@ -80,6 +83,15 @@ class LockTracker:
             res.duplicate = True
             return res
         key = self._key(ev)
+
+        # the device's own WiFi connectivity, as seen by the cloud. This is the
+        # only realtime signal we still get once a lock drops offline (no more
+        # lock/door/action events will arrive until it reconnects).
+        if ev.kind == "wifiState" and ev.state in ("0", "1"):
+            online = ev.state == "1"
+            if online != self.state.online:
+                self.state.online = online
+                res.changes.append(f"online={online}")
 
         # setLock = command issued (not yet physical) -> mark pending
         if ev.kind == "setLock" and ev.state in ("locked", "unlocked"):

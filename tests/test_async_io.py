@@ -156,6 +156,50 @@ async def test_discover_rescans_when_pinned_datacenter_goes_dry():
     assert ha._active_codes == ["PhilipsNorthAmerica"]  # re-pinned
 
 
+async def test_mirrored_lock_prefers_its_home_datacenters_copy():
+    """Regression: a stale mirror must not win over the lock's home datacenter.
+
+    Reproduces the live account: the lock is homed in north-america but is also
+    echoed by Singapore's device/list, which is queried FIRST and serves a stale
+    copy (`online=0` while the lock is actually up). Only the home datacenter's
+    copy is live, so that's the one that must survive de-duplication -- otherwise
+    the mirror's stale `online` marks every entity unavailable.
+    """
+    def rec(online):
+        return {"wifiSN": "RL1", "userNumberId": 0,
+                "dataCenter": "north-america", "online": online}
+
+    sess = _Session([_login_3dc(),
+                     _devlist(),                                       # Oneness: empty
+                     {"code": 200, "data": {"wifiList": [rec("0")]}},  # SG: stale mirror
+                     {"code": 200, "data": {"wifiList": [rec("1")]}}]) # NA: home, live
+    ha = HomeAccess(_settings(), session=sess)
+    locks = await ha.async_discover()
+
+    assert [l.esn for l in locks] == ["RL1"]
+    assert locks[0].online is True, "stale mirror copy beat the home datacenter's"
+    # ...and the mirror is not worth polling: it only ever loses de-duplication.
+    assert ha._active_codes == ["PhilipsNorthAmerica"]
+
+
+async def test_mirror_only_datacenter_is_polled_when_nothing_hosts():
+    """A lock whose home datacenter isn't in our token set stays reachable.
+
+    Degenerate case of the mirror rule: if no queried datacenter claims to host
+    the lock, the mirror is all we have, so it must still be polled rather than
+    leaving an empty poll set.
+    """
+    rec = {"wifiSN": "RL1", "userNumberId": 0, "dataCenter": "atlantis"}
+    sess = _Session([_login_3dc(), _devlist(),
+                     {"code": 200, "data": {"wifiList": [rec]}},  # SG mirrors it
+                     _devlist()])                                 # NA: nothing
+    ha = HomeAccess(_settings(), session=sess)
+    locks = await ha.async_discover()
+
+    assert [l.esn for l in locks] == ["RL1"]
+    assert ha._active_codes == ["PhilipsSingapore"]
+
+
 async def test_state_io_runs_off_the_event_loop(monkeypatch):
     """Regression: state.load/save must never run on the event-loop thread.
 

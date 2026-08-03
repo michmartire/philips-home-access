@@ -46,7 +46,7 @@ class PhilipsCoordinator(DataUpdateCoordinator[dict[str, LockState]]):
             if tr is None:
                 self._trackers[lock.esn] = LockTracker(LockState(
                     lock.esn, bolt=lock.open_status, door=lock.door,
-                    battery=lock.battery))
+                    battery=lock.battery, online=lock.online))
             else:
                 # A poll is authoritative for current bolt/battery; keep door if
                 # the poll can't determine it (door is event-driven).
@@ -56,6 +56,14 @@ class PhilipsCoordinator(DataUpdateCoordinator[dict[str, LockState]]):
                     tr.state.door = lock.door
                 if lock.battery is not None:
                     tr.state.battery = lock.battery
+                # online is always a definite bool (unlike bolt/door/battery,
+                # never "undetermined"), and it's the cloud's own freshest
+                # word on whether it can currently reach the device at all --
+                # trust it outright, every poll.
+                if lock.online != tr.state.online:
+                    _LOGGER.info("lock %s connectivity -> %s", lock.esn,
+                                 "online" if lock.online else "OFFLINE")
+                    tr.state.online = lock.online
         # Locks whose datacenter has no realtime WS are poll-only -> poll fast;
         # otherwise the WS is primary and the poll is a slow safety-net.
         interval = (SLOW_POLL_INTERVAL

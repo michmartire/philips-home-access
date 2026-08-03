@@ -107,34 +107,49 @@ class HomeAccess:
 
     # -- devices ------------------------------------------------------------
     async def _scan(self, codes: list[str]) -> tuple[list[Lock], list[str]]:
-        """Query device/list across `codes`; return (locks, codes-that-had-locks)."""
+        """Query device/list across `codes`; return (locks, codes-worth-polling)."""
         found: dict[str, Lock] = {}
-        productive: list[str] = []
+        hosts: list[str] = []      # datacenters that HOST a lock -> live data
+        mirrors: list[str] = []    # datacenters that only echo someone else's
         for code in codes:
             if code not in constants.DATACENTERS:
                 continue
             resp = await self.client(code).post(constants.DEVICE_LIST_PATH,
                                                 json={"uid": self.account.uid})
             wifi = (resp.get("data") or {}).get("wifiList") or []
-            if wifi:
-                productive.append(code)
+            hosted = False
             for rec in wifi:
                 lk = Lock.from_device_record(rec, code)
-                prev = found.get(lk.esn)
-                # The same lock can appear in several datacenters' lists; keep
-                # the copy fetched from its own (true) datacenter.
-                if prev is None or (lk.datacenter_code == code
-                                    and prev.datacenter_code != code):
+                # The same lock is echoed by several datacenters' lists, but
+                # only the one that actually hosts it serves live data -- the
+                # other copies are stale mirrors, and `online` in particular can
+                # sit wrong there for hours. Keep the copy served BY the lock's
+                # home datacenter: compare `code` (where THIS copy came from)
+                # against the home the record names. Comparing a previous copy's
+                # .datacenter_code cannot break the tie -- every copy names the
+                # same home, whichever datacenter handed it to us.
+                if lk.esn not in found or code == lk.datacenter_code:
                     found[lk.esn] = lk
-        return list(found.values()), productive
+                if code == lk.datacenter_code:
+                    hosted = True
+            if hosted:
+                hosts.append(code)
+            elif wifi:
+                mirrors.append(code)
+        # Poll only the datacenters that host a lock: a mirror costs a round-trip
+        # per poll and its copy loses de-duplication anyway. Fall back to mirrors
+        # if nothing claims to host, so the poll set is never empty (and a
+        # re-homed lock is still reachable until the next full re-scan).
+        return list(found.values()), hosts or mirrors
 
     async def async_discover(self) -> list[Lock]:
-        """Enumerate all locks, polling only datacenters known to hold them.
+        """Enumerate all locks, polling only the datacenters that host them.
 
         Login hands back a token per datacenter, but a given account's locks
-        live in only one (or a few) of them; the rest 500 or return nothing.
-        We pin the productive datacenter(s) after the first find and poll only
-        those, re-scanning everything if they ever come back empty.
+        live in only one (or a few) of them; the rest 500, return nothing, or
+        echo a stale mirror of a lock homed elsewhere. We pin the hosting
+        datacenter(s) after the first find and poll only those, re-scanning
+        everything if they ever come back empty.
         """
         await self._ensure_logged_in()
         if self.settings.datacenter:

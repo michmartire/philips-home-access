@@ -62,3 +62,12 @@ def test_event_carries_msgid_and_timestamp():
 
 def test_non_json_returns_none():
     assert parse_event("not json") is None
+
+
+def test_wifistate_carries_online_flag():
+    offline = parse_event(_frame({"func": "wfevent", "body": {
+        "lockId": "RL1", "eventtype": "wifiState", "state": "0"}}))
+    assert offline.kind == "wifiState" and offline.state == "0"
+    online = parse_event(_frame({"func": "wfevent", "body": {
+        "lockId": "RL1", "eventtype": "wifiState", "state": "1"}}))
+    assert online.kind == "wifiState" and online.state == "1"
